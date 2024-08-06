@@ -13,3 +13,9 @@ cmake -B ./build .
 cmake --build build --config MinSizeRel --target all
 ./build/tcp_port_forward 31212 127.0.0.1 22 # forward any data from 31212 to local 22 port
 ```
+
+or you could simply run:
+```shell
+gcc tcp_port_forward.c
+./a.out 31212 127.0.0.1 22 # forward any data from 31212 to local 22 port
+```

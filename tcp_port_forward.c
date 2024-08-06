@@ -311,8 +311,8 @@ int main(int argc, char *argv[]) {
       // we don't know whether it is a client fd or a remote fd that triggers
       // this event,so we need to use query_client_session or
       // query_remote_session and check the returned value is not NULL to find
-      // the associated sessions,then free both client socket and remote socket
-      // which the session manages.
+      // out the associated session,then free both client socket and remote
+      // socket which the session manages.
       if (events[i].events & (EPOLLRDHUP | EPOLLHUP)) {
         session = query_client_session(&head, events[i].data.fd);
         if (session != NULL) {
@@ -328,7 +328,7 @@ int main(int argc, char *argv[]) {
       // we don't know whether it is a client fd or a remote fd that triggers
       // this event,so we need to use query_client_session or
       // query_remote_session and check the returned value is not NULL to find
-      // the associated sessions,then write data to another fd.
+      // out the associated session,then write data to another fd.
       if (events[i].events & EPOLLIN) {
         session = query_client_session(&head, events[i].data.fd);
         if (session != NULL) {
