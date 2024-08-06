@@ -1,3 +1,0 @@
-/home/kzj/epoll-tcp-port-forward/build/CMakeFiles/tcp_port_forward.dir
-/home/kzj/epoll-tcp-port-forward/build/CMakeFiles/edit_cache.dir
-/home/kzj/epoll-tcp-port-forward/build/CMakeFiles/rebuild_cache.dir
