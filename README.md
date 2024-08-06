@@ -1,21 +1,21 @@
 # epoll-tcp-port-forward
-This is a program implements tcp port forwarding with epoll.  
-This program is designed for those who wants to learn epoll with a practical project.  
-It is not recommended to use it in a production environment.  
-IPTABLES IS A BETTER CHOICE.
+This program implements TCP port forwarding using epoll.
+It is designed for those who want to learn epoll through a practical project.
+Note: This program is not recommended for production use.
+For production, IPTABLES IS A BETTER CHOICE.
 
 
 # Compile And Run
 ```shell
-# need cmake to build this project
+# Requires cmake to build this project
 cd epoll-tcp-port-forward
 cmake -B ./build .
 cmake --build build --config MinSizeRel --target all
-./build/tcp_port_forward 31212 127.0.0.1 22 # forward any data from 31212 to local 22 port
+./build/tcp_port_forward 31212 127.0.0.1 22 # Forward any data from port 31212 to local port 22
 ```
 
-or you could simply run:
+Alternatively, you can simply run:
 ```shell
 gcc tcp_port_forward.c
-./a.out 31212 127.0.0.1 22 # forward any data from 31212 to local 22 port
+./a.out 31212 127.0.0.1 22 # Forward any data from port 31212 to local port 22
 ```
