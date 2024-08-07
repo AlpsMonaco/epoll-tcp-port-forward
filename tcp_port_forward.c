@@ -106,6 +106,9 @@ static struct session *query_client_session(sessions *head, int client_fd) {
 // Remove monitoring of a client fd and a remote fd from epoll,
 // close them, and delete the session from the sessions list.
 static void free_session(struct session *session, sessions *head, int epfd) {
+  if (session == NULL) {
+    return;
+  }
   // Remove the remote file descriptor from epoll monitoring.
   epoll_ctl(epfd, EPOLL_CTL_DEL, session->remote_fd, NULL);
   // Remove the client file descriptor from epoll monitoring.
@@ -116,7 +119,8 @@ static void free_session(struct session *session, sessions *head, int epfd) {
   close(session->client_fd);
 
   // Log the closing of the file descriptors.
-  printf("closing fd: %d %d\n", session->remote_fd, session->client_fd);
+  printf("[-] client socket is closed,fd:%d\n", session->client_fd);
+  printf("[-] remote socket is closed,fd:%d\n", session->remote_fd);
 
   // Delete the session from the sessions list.
   del_session(head, session->client_fd);
@@ -193,11 +197,6 @@ static int listen_local(unsigned short local_port,
   return fd;
 }
 
-#define LOG_EPOLL_EVENT(fd_id, event_id)                                       \
-  do {                                                                         \
-    printf("fd:%d event:%d\n", fd_id, event_id);                               \
-  } while (0)
-
 int main(int argc, char *argv[]) {
   if (argc < 4) {
     print_help_msg();
@@ -246,7 +245,6 @@ int main(int argc, char *argv[]) {
   for (;;) {
     nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
     for (int i = 0; i < nfds; i++) {
-      LOG_EPOLL_EVENT(events[i].data.fd, events[i].events);
       // Handle new client connections.
       if (events[i].data.fd == local_fd) {
         client_fd = accept(local_fd, (struct sockaddr *)&client_addr, &socklen);
@@ -262,7 +260,7 @@ int main(int argc, char *argv[]) {
         ev.events = EPOLLIN | EPOLLRDHUP | EPOLLHUP;
         ev.data.fd = client_fd;
         epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &ev);
-
+        printf("[+] new client accepted,fd:%d\n", client_fd);
         // Connect to the remote address.
         remote_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (remote_fd == -1) {
@@ -273,6 +271,7 @@ int main(int argc, char *argv[]) {
           print_last_error();
           return 1;
         }
+        printf("[+] connecting to remote socket,fd:%d\n", remote_fd);
         memset(&remote_addr, 0, sizeof(remote_addr));
         remote_addr.sin_family = AF_INET;
         remote_addr.sin_port = htons(remote_port);
@@ -313,6 +312,10 @@ int main(int argc, char *argv[]) {
           close(session->client_fd);
           close(events[i].data.fd);
         } else {
+          printf("[+] remote socket is connected,fd:%d\n", session->remote_fd);
+          printf("[+] port forwarding tunnel is opened now,client socket "
+                 "fd:%d,remote socket fd:%d\n",
+                 session->client_fd, session->remote_fd);
           session->ready = true;
           ev.events = EPOLLIN | EPOLLRDHUP | EPOLLHUP;
           ev.data.fd = events[i].data.fd;
@@ -327,6 +330,8 @@ int main(int argc, char *argv[]) {
       // out the associated session,then free both client socket and remote
       // socket which the session manages.
       if (events[i].events & (EPOLLRDHUP | EPOLLHUP)) {
+        printf("[-] socket disconnected event,fd:%d,event:%d\n",
+               events[i].data.fd, events[i].events);
         session = query_client_session(&head, events[i].data.fd);
         if (session != NULL) {
           free_session(session, &head, epfd);
