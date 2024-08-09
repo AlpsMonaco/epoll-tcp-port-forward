@@ -10,192 +10,18 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "session.h"
+
 #define MAX_EVENTS 32
 #define BUF_SIZE 64
 
-static void print_help_msg() {
-  printf("usage:\n  ./tcp_port_forward [local_port] [remote_ip] [remote_port]");
-}
-
-// A session binds a client socket to a remote socket and forwards data between
-// them.
-struct session {
-  int client_fd; // File descriptor for the client socket.
-  int remote_fd; // File descriptor for the remote socket.
-
-  // Indicates whether the remote socket is ready for communication.
-  // When the remote socket is not connected, the client might have sent some
-  // data. In this case, we avoid reading data from the client until the remote
-  // socket is ready. If we don't read from the client, epoll will continue to
-  // signal readability events, allowing us to read the data later when the
-  // remote socket is ready.
-  bool ready;
-  struct session *next;
-};
-
-// a linked list that handles all sessions.
-typedef struct session *sessions;
-
-// Bind a client socket to a remote socket, create a session that holds them,
-// and push it to the sessions list for later querying.
-static struct session *add_session(sessions *head, int client_fd,
-                                   int remote_fd) {
-  struct session *new_session =
-      (struct session *)malloc(sizeof(struct session));
-  new_session->client_fd = client_fd;
-  new_session->remote_fd = remote_fd;
-  new_session->ready = false;
-  new_session->next = NULL;
-  if (*head == NULL) {
-    *head = new_session;
-  } else {
-    struct session *p = *head;
-    while (p->next != NULL) {
-      p = p->next;
-    }
-    p->next = new_session;
-  }
-  return new_session;
-}
-
-// Delete a session from the sessions list using the client file descriptor.
-static void del_session(sessions *head, int client_fd) {
-  struct session *prev = NULL, *p = NULL;
-  p = *head;
-  while (p != NULL) {
-    if (p->client_fd == client_fd) {
-      if (prev != NULL) {
-        prev->next = p->next;
-      } else {
-        *head = p->next;
-      }
-      free(p);
-      return;
-    }
-    prev = p;
-    p = p->next;
-  }
-}
-
-// Query a session by the remote file descriptor.
-static struct session *query_remote_session(sessions *head, int remote_fd) {
-  struct session *p = NULL;
-  p = *head;
-  while (p != NULL) {
-    if (p->remote_fd == remote_fd) {
-      return p;
-    }
-    p = p->next;
-  }
-  return NULL; // Return NULL if no matching session is found.
-}
-
-// Query a session by the client file descriptor.
-static struct session *query_client_session(sessions *head, int client_fd) {
-  struct session *p = NULL;
-  p = *head;
-  while (p != NULL) {
-    if (p->client_fd == client_fd) {
-      return p;
-    }
-    p = p->next;
-  }
-  return NULL; // Return NULL if no matching session is found.
-}
-
-// Remove monitoring of a client fd and a remote fd from epoll,
-// close them, and delete the session from the sessions list.
-static void free_session(struct session *session, sessions *head, int epfd) {
-  if (session == NULL) {
-    return;
-  }
-  // Remove the remote file descriptor from epoll monitoring.
-  epoll_ctl(epfd, EPOLL_CTL_DEL, session->remote_fd, NULL);
-  // Remove the client file descriptor from epoll monitoring.
-  epoll_ctl(epfd, EPOLL_CTL_DEL, session->client_fd, NULL);
-
-  // Close the remote and client file descriptors.
-  close(session->remote_fd);
-  close(session->client_fd);
-
-  // Log the closing of the file descriptors.
-  printf("[-] client socket is closed,fd:%d\n", session->client_fd);
-  printf("[-] remote socket is closed,fd:%d\n", session->remote_fd);
-
-  // Delete the session from the sessions list.
-  del_session(head, session->client_fd);
-}
-
-static void print_last_error() { fprintf(stderr, strerror(errno)); }
-
-/// @brief Parses a string to a port number and checks if the input is valid.
-/// @param src The input string representing the port number (e.g., argv[1] or
-/// argv[3]).
-/// @param port Pointer to an unsigned short to store the parsed port number.
-/// @return A boolean indicating whether the input is a valid port number.
-static bool get_port(const char *src, unsigned short *port) {
-  char *end;
-  unsigned long result = strtoul(src, &end, 10);
-  if (*end != '\0') {
-    return false;
-  }
-  if (result == 0 || result > 65535) {
-    fprintf(stderr, "invalid port");
-    return false;
-  }
-  *port = result;
-  return true;
-}
-
-/// @brief Sets the socket file descriptor to non-blocking mode. Necessary for
-/// epoll.
-/// @param sockfd The socket file descriptor to set to non-blocking mode.
-/// @return A boolean indicating whether the non-blocking state was successfully
-/// set.
-static bool set_non_blocking(int sockfd) {
-  int flag;
-  // Retrieve the current file descriptor flags.
-  flag = fcntl(sockfd, F_GETFL, 0);
-  if (flag == -1) {
-    return false;
-  }
-  // Set the file descriptor flags to include O_NONBLOCK.
-  flag = fcntl(sockfd, F_SETFL, flag | O_NONBLOCK);
-  if (flag == -1) {
-    return false;
-  }
-  return true;
-}
-
-/// @brief Listen on a local port. Any request to this port will be forwarded to
-/// the specified remote port.
-/// @param local_port The local port to listen on.
-/// @param local_addr Pointer to a sockaddr_in structure to hold the local
-/// address information.
-/// @return The socket file descriptor that listens on the local port, or -1 on
-/// error.
+static void print_help_msg();
+static void free_session(struct session *session, sessions *head, int epfd);
+static void print_last_error();
+static bool get_port(const char *src, unsigned short *port);
+static bool set_non_blocking(int sockfd);
 static int listen_local(unsigned short local_port,
-                        struct sockaddr_in *local_addr) {
-  int fd;
-  fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd == -1) {
-    return -1;
-  }
-  memset(local_addr, 0, sizeof(struct sockaddr_in));
-  local_addr->sin_family = AF_INET;
-  local_addr->sin_addr.s_addr = INADDR_ANY;
-  local_addr->sin_port = htons(local_port);
-  if (bind(fd, (struct sockaddr *)local_addr, sizeof(*local_addr)) == -1) {
-    return -1;
-  }
-  if (!set_non_blocking(fd)) {
-    return -1;
-  }
-  if (listen(fd, 32) == -1) {
-    return -1;
-  }
-  return fd;
-}
+                        struct sockaddr_in *local_addr);
 
 int main(int argc, char *argv[]) {
   if (argc < 4) {
@@ -365,4 +191,102 @@ int main(int argc, char *argv[]) {
     }
   }
   return 0;
+}
+
+static void print_help_msg() {
+  printf("usage:\n  ./tcp_port_forward [local_port] [remote_ip] [remote_port]");
+}
+
+// Remove monitoring of a client fd and a remote fd from epoll,
+// close them, and delete the session from the sessions list.
+static void free_session(struct session *session, sessions *head, int epfd) {
+  if (session == NULL) {
+    return;
+  }
+  // Remove the remote file descriptor from epoll monitoring.
+  epoll_ctl(epfd, EPOLL_CTL_DEL, session->remote_fd, NULL);
+  // Remove the client file descriptor from epoll monitoring.
+  epoll_ctl(epfd, EPOLL_CTL_DEL, session->client_fd, NULL);
+
+  // Close the remote and client file descriptors.
+  close(session->remote_fd);
+  close(session->client_fd);
+
+  // Log the closing of the file descriptors.
+  printf("[-] client socket is closed,fd:%d\n", session->client_fd);
+  printf("[-] remote socket is closed,fd:%d\n", session->remote_fd);
+
+  // Delete the session from the sessions list.
+  del_session(head, session->client_fd);
+}
+
+static void print_last_error() { fprintf(stderr, strerror(errno)); }
+
+/// @brief Parses a string to a port number and checks if the input is valid.
+/// @param src The input string representing the port number (e.g., argv[1] or
+/// argv[3]).
+/// @param port Pointer to an unsigned short to store the parsed port number.
+/// @return A boolean indicating whether the input is a valid port number.
+static bool get_port(const char *src, unsigned short *port) {
+  char *end;
+  unsigned long result = strtoul(src, &end, 10);
+  if (*end != '\0') {
+    return false;
+  }
+  if (result == 0 || result > 65535) {
+    fprintf(stderr, "invalid port");
+    return false;
+  }
+  *port = result;
+  return true;
+}
+
+/// @brief Sets the socket file descriptor to non-blocking mode. Necessary for
+/// epoll.
+/// @param sockfd The socket file descriptor to set to non-blocking mode.
+/// @return A boolean indicating whether the non-blocking state was successfully
+/// set.
+static bool set_non_blocking(int sockfd) {
+  int flag;
+  // Retrieve the current file descriptor flags.
+  flag = fcntl(sockfd, F_GETFL, 0);
+  if (flag == -1) {
+    return false;
+  }
+  // Set the file descriptor flags to include O_NONBLOCK.
+  flag = fcntl(sockfd, F_SETFL, flag | O_NONBLOCK);
+  if (flag == -1) {
+    return false;
+  }
+  return true;
+}
+
+/// @brief Listen on a local port. Any request to this port will be forwarded to
+/// the specified remote port.
+/// @param local_port The local port to listen on.
+/// @param local_addr Pointer to a sockaddr_in structure to hold the local
+/// address information.
+/// @return The socket file descriptor that listens on the local port, or -1 on
+/// error.
+static int listen_local(unsigned short local_port,
+                        struct sockaddr_in *local_addr) {
+  int fd;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd == -1) {
+    return -1;
+  }
+  memset(local_addr, 0, sizeof(struct sockaddr_in));
+  local_addr->sin_family = AF_INET;
+  local_addr->sin_addr.s_addr = INADDR_ANY;
+  local_addr->sin_port = htons(local_port);
+  if (bind(fd, (struct sockaddr *)local_addr, sizeof(*local_addr)) == -1) {
+    return -1;
+  }
+  if (!set_non_blocking(fd)) {
+    return -1;
+  }
+  if (listen(fd, 32) == -1) {
+    return -1;
+  }
+  return fd;
 }

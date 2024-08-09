@@ -5,5 +5,12 @@
             "127.0.0.1",
             "22"
         ]
+    },
+    "files.associations": {
+        "unistd.h": "c",
+        "inet.h": "c",
+        "in.h": "c",
+        "stdlib.h": "c",
+        "session.h": "c"
     }
 }
