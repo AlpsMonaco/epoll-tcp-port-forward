@@ -1,0 +1,3 @@
+[submodule "windows/wepoll"]
+	path = windows/wepoll
+	url = https://github.com/piscisaureus/wepoll
