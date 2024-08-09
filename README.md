@@ -19,3 +19,14 @@ Alternatively, you can simply run:
 gcc tcp_port_forward.c
 ./a.out 31212 127.0.0.1 22 # Forward any data from port 31212 to local port 22
 ```
+
+# Windows
+There's no native epoll support on Windows.  
+Thanks to [wepoll](https://github.com/piscisaureus/wepoll),an open source library that implements epoll API,you could still run this project on Windows.
+```shell
+cd epoll-tcp-port-forward\windows
+git submodule update --init
+cmake -B ./build .
+cmake --build build --config MinSizeRel --target all
+.\build\tcp_port_forward 31212 127.0.0.1 22 # Forward any data from port 31212 to local port 22
+```
